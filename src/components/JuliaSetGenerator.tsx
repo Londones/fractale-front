@@ -3,17 +3,31 @@ import type { FractalParams } from "../types/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const JuliaSetGenerator = () => {
   const [params, setParams] = useState<FractalParams>({
     c: { real: -0.7, imag: 0.27015 },
     center: { real: 0, imag: 0 },
-    zoom: 100,
-    maxIterations: 100,
-    width: 800,
+    zoom: 250,
+    maxIterations: 200,
+    width: 1200,
     height: 600,
+    coloring: Math.floor(Math.random() * 11) + 1,
   });
   const [tiles, setTiles] = useState({});
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -22,14 +36,33 @@ const JuliaSetGenerator = () => {
   const lastMousePosition = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
-    wsRef.current = new WebSocket("ws://localhost:8080/ws");
-    wsRef.current.onmessage = (event) => {
-      const tileMsg = JSON.parse(event.data);
-      setTiles((prevTiles) => ({
-        ...prevTiles,
-        [`${tileMsg.x},${tileMsg.y},${tileMsg.zoom}`]: tileMsg.data,
-      }));
+    const connectWebSocket = () => {
+      wsRef.current = new WebSocket(import.meta.env.SERVER_URL_WS as string);
+
+      wsRef.current.onopen = () => {
+        updateJuliaSet();
+      };
+
+      wsRef.current.onmessage = (event) => {
+        const tileMsg = JSON.parse(event.data);
+        setTiles((prevTiles) => ({
+          ...prevTiles,
+          [`${tileMsg.x},${tileMsg.y},${tileMsg.zoom}`]: tileMsg.data,
+        }));
+      };
+
+      wsRef.current.onerror = (error) => {
+        console.error("WebSocket error", error);
+      };
+
+      wsRef.current.onclose = () => {
+        wsRef.current = null;
+        console.log("WebSocket closed. Reconnecting...");
+        setTimeout(connectWebSocket, 1000);
+      };
     };
+
+    connectWebSocket();
 
     return () => {
       if (wsRef.current) {
@@ -46,10 +79,10 @@ const JuliaSetGenerator = () => {
         ctx.clearRect(0, 0, params.width, params.height);
 
         Object.entries(tiles).forEach(([key, data]) => {
-          const [x, y, zoom] = key.split(",").map(Number);
+          const [x, y] = key.split(",").map(Number);
           const img = new Image();
           img.onload = () => {
-            ctx.drawImage(img, x * 256, y * 256);
+            ctx.drawImage(img, x * 128, y * 128);
           };
           img.src = `data:image/png;base64,${data}`;
         });
@@ -93,6 +126,14 @@ const JuliaSetGenerator = () => {
     });
   };
 
+  const handleColoringChange = (value: string) => {
+    setParams((prev) => ({
+      ...prev,
+      coloring: parseInt(value),
+    }));
+    updateJuliaSet();
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     isDragging.current = true;
     lastMousePosition.current = { x: e.clientX, y: e.clientY };
@@ -110,6 +151,7 @@ const JuliaSetGenerator = () => {
         },
       }));
       lastMousePosition.current = { x: e.clientX, y: e.clientY };
+      updateJuliaSet();
     }
   };
 
@@ -119,12 +161,12 @@ const JuliaSetGenerator = () => {
   };
 
   const handleWheel = (e: React.WheelEvent) => {
-    const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
+    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
     setParams((prev) => {
       const newZoom = prev.zoom * zoomFactor;
       return {
         ...prev,
-        zoom: newZoom < 100 ? 100 : newZoom,
+        zoom: newZoom < 250 ? 250 : newZoom,
       };
     });
     updateJuliaSet();
@@ -132,13 +174,13 @@ const JuliaSetGenerator = () => {
 
   return (
     <div className="container mx-auto p-4">
-      <Card className="mb-4">
-        <CardHeader>
-          <CardTitle>Julia Set Generator</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-4">
+      <Card>
+        <CardContent className="p-0 relative">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button className="absolute top-4 left-4 z-10">Controls</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-64 p-4 flex flex-col gap-2">
               <div className="space-y-2">
                 <Label htmlFor="c-real">C (Real)</Label>
                 <Input
@@ -161,8 +203,6 @@ const JuliaSetGenerator = () => {
                   step="0.01"
                 />
               </div>
-            </div>
-            <div className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="zoom">Zoom</Label>
                 <Slider
@@ -187,25 +227,51 @@ const JuliaSetGenerator = () => {
                   min="1"
                 />
               </div>
-            </div>
-          </div>
-          <Button className="mt-4" onClick={updateJuliaSet}>
-            Generate Julia Set
-          </Button>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent className="p-0">
+              <div className="space-y-2">
+                <Label htmlFor="coloring">Coloring</Label>
+                <Select
+                  name="coloring"
+                  value={params.coloring.toString()}
+                  onValueChange={handleColoringChange}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a coloring" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="1">Smooth Color</SelectItem>
+                      <SelectItem value="2">Stripe Pattern</SelectItem>
+                      <SelectItem value="3">Electric Plasma</SelectItem>
+                      <SelectItem value="4">Psychedelic Swirl</SelectItem>
+                      <SelectItem value="5">Metallic Sheen</SelectItem>
+                      <SelectItem value="6">Rainbow Spiral</SelectItem>
+                      <SelectItem value="7">Autumn Leaves</SelectItem>
+                      <SelectItem value="8">Ocean Depths</SelectItem>
+                      <SelectItem value="9">Molten Lava</SelectItem>
+                      <SelectItem value="10">Alternate Colorings</SelectItem>
+                      <SelectItem value="11">Coloring Mix</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button className="w-full" onClick={updateJuliaSet}>
+                Generate Julia Set
+              </Button>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <canvas
+            style={{
+              cursor: isDragging.current ? "grabbing" : "grab",
+              borderRadius: "0.5rem",
+            }}
             ref={canvasRef}
             width={params.width}
             height={params.height}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
             onWheel={handleWheel}
-            className="w-full h-auto cursor-move"
+            className="w-full h-auto"
           />
         </CardContent>
       </Card>
