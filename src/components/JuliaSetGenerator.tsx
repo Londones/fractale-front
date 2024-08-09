@@ -29,7 +29,7 @@ const JuliaSetGenerator = () => {
     height: 600,
     coloring: Math.floor(Math.random() * 11) + 1,
   });
-  const [tiles, setTiles] = useState({});
+  const [image, setImage] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const isDragging = useRef(false);
@@ -37,18 +37,15 @@ const JuliaSetGenerator = () => {
 
   useEffect(() => {
     const connectWebSocket = () => {
-      wsRef.current = new WebSocket(import.meta.env.SERVER_URL_WS as string);
+      wsRef.current = new WebSocket("ws://localhost:8080/ws");
 
       wsRef.current.onopen = () => {
         updateJuliaSet();
       };
 
       wsRef.current.onmessage = (event) => {
-        const tileMsg = JSON.parse(event.data);
-        setTiles((prevTiles) => ({
-          ...prevTiles,
-          [`${tileMsg.x},${tileMsg.y},${tileMsg.zoom}`]: tileMsg.data,
-        }));
+        const data = JSON.parse(event.data);
+        setImage(data.image);
       };
 
       wsRef.current.onerror = (error) => {
@@ -72,27 +69,21 @@ const JuliaSetGenerator = () => {
   }, []);
 
   useEffect(() => {
-    if (canvasRef.current) {
+    if (canvasRef.current && image) {
       const ctx = canvasRef.current.getContext("2d");
-
       if (ctx) {
-        ctx.clearRect(0, 0, params.width, params.height);
-
-        Object.entries(tiles).forEach(([key, data]) => {
-          const [x, y] = key.split(",").map(Number);
-          const img = new Image();
-          img.onload = () => {
-            ctx.drawImage(img, x * 128, y * 128);
-          };
-          img.src = `data:image/png;base64,${data}`;
-        });
+        const img = new Image();
+        img.onload = () => {
+          ctx.clearRect(0, 0, params.width, params.height);
+          ctx.drawImage(img, 0, 0);
+        };
+        img.src = `data:image/png;base64,${image}`;
       }
     }
-  }, [tiles, params.width, params.height]);
+  }, [image, params]);
 
   const updateJuliaSet = () => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      setTiles({});
       wsRef.current.send(JSON.stringify(params));
     }
   };
