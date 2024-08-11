@@ -6,6 +6,7 @@ export type FractalParams = {
   center: Complex;
   maxIterations: number;
   coloring: number;
+  lod: number;
 };
 
 export type Complex = {
@@ -16,7 +17,6 @@ export type Complex = {
 export type Tile = {
   x: number;
   y: number;
-  zoom: number;
   lod: number;
-  data: string;
+  image: HTMLImageElement;
 };
