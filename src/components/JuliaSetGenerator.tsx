@@ -24,7 +24,7 @@ const TILE_SIZE = 128;
 
 const JuliaSetGenerator = () => {
   const [params, setParams] = useState<FractalParams>({
-    c: { real: -0.7, imag: 0.27015 },
+    c: { real: 0.285, imag: -0.01 },
     center: { real: 0, imag: 0 },
     zoom: 250,
     maxIterations: 200,
