@@ -51,7 +51,7 @@ const JuliaSetGenerator = () => {
   });
   const [isSlowUpdate, setIsSlowUpdate] = useState(false);
 
-  const quickDebouncedParams = useDebounce(params, 10);
+  const quickDebouncedParams = useDebounce(params, 0);
 const slowDebouncedParams = useDebounce(params, 1000);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glRef = useRef<WebGLRenderingContext | null>(null);
@@ -144,7 +144,6 @@ const slowDebouncedParams = useDebounce(params, 1000);
     if (gl && textureRef.current) {
       gl.bindTexture(gl.TEXTURE_2D, textureRef.current);
       const { width, height } = params;
-      console.log(`Received binary data length: ${pixelData.length}`);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixelData);
       renderFractal();
     }
@@ -155,8 +154,8 @@ const slowDebouncedParams = useDebounce(params, 1000);
   }, [initWebGL]);
 
   useEffect(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      return; // Already connected
     }
 
     wsRef.current = new WebSocket('ws://localhost:8080/ws');
@@ -185,7 +184,41 @@ const slowDebouncedParams = useDebounce(params, 1000);
     };
   }, [quickDebouncedParams, slowDebouncedParams, params.height, params.width, renderFractal, params, handleBinaryData, isSlowUpdate]);
 
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+
+      setParams((prev) => {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const centerX = prev.center.real + (mouseX - prev.width / 2) / prev.zoom;
+        const centerY = prev.center.imag - (mouseY - prev.height / 2) / prev.zoom;
+
+        const newZoom = prev.zoom * zoomFactor;
+
+        return {
+          ...prev,
+          zoom: newZoom,
+          center: {
+            real: centerX - (mouseX - prev.width / 2) / newZoom,
+            imag: centerY + (mouseY - prev.height / 2) / newZoom,
+          },
+        };
+      });
+    };
+
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+
+    return () => {
+      canvas.removeEventListener('wheel', handleWheel);
+    };
+  }, []);
   
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>, isSlowUpdate = true) => {
@@ -249,32 +282,32 @@ const slowDebouncedParams = useDebounce(params, 1000);
     isDragging.current = false;
   };
 
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+  // const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+  //   e.preventDefault();
+  //   const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
 
-    setParams((prev) => {
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return prev;
+  //   setParams((prev) => {
+  //     const rect = canvasRef.current?.getBoundingClientRect();
+  //     if (!rect) return prev;
 
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
+  //     const mouseX = e.clientX - rect.left;
+  //     const mouseY = e.clientY - rect.top;
 
-      const centerX = prev.center.real + (mouseX - prev.width / 2) / prev.zoom;
-      const centerY = prev.center.imag - (mouseY - prev.height / 2) / prev.zoom;
+  //     const centerX = prev.center.real + (mouseX - prev.width / 2) / prev.zoom;
+  //     const centerY = prev.center.imag - (mouseY - prev.height / 2) / prev.zoom;
 
-      const newZoom = prev.zoom * zoomFactor;
+  //     const newZoom = prev.zoom * zoomFactor;
 
-      return {
-        ...prev,
-        zoom: newZoom,
-        center: {
-          real: centerX - (mouseX - prev.width / 2) / newZoom,
-          imag: centerY + (mouseY - prev.height / 2) / newZoom,
-        },
-      };
-    });
-  };
+  //     return {
+  //       ...prev,
+  //       zoom: newZoom,
+  //       center: {
+  //         real: centerX - (mouseX - prev.width / 2) / newZoom,
+  //         imag: centerY + (mouseY - prev.height / 2) / newZoom,
+  //       },
+  //     };
+  //   });
+  // };
 
   return (
     <div className="container mx-auto p-4">
@@ -372,7 +405,7 @@ const slowDebouncedParams = useDebounce(params, 1000);
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
-            onWheel={handleWheel}
+            //onWheel={handleWheel}
           />
         </CardContent>
       </Card>
