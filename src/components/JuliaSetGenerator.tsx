@@ -19,22 +19,23 @@ import {
 } from "@/components/ui/dropdown-menu";
 import useDebounce from "@/hooks/useDebounce";
 
-const vertexShaderSource = `
-  attribute vec2 a_position;
-  varying vec2 v_texCoord;
+const vertexShaderSource = `#version 300 es
+  in vec2 a_position;
+  out vec2 v_texCoord;
   void main() {
     gl_Position = vec4(a_position, 0, 1);
     v_texCoord = (a_position + 1.0) / 2.0;
   }
 `;
 
-const fragmentShaderSource = `
+const fragmentShaderSource = `#version 300 es
   precision highp float;
   uniform sampler2D u_texture;
-  varying vec2 v_texCoord;
+  in vec2 v_texCoord;
+  out vec4 outColor;
 
   void main() {
-    gl_FragColor = texture2D(u_texture, v_texCoord);
+    outColor = texture(u_texture, v_texCoord);
   }
 `;
 
@@ -50,13 +51,16 @@ const JuliaSetGenerator = () => {
     lod: 1,
   });
   const [isSlowUpdate, setIsSlowUpdate] = useState(false);
+  const [needsRender, setNeedsRender] = useState(true);
+  const animationFrameId = useRef<number | null>(null);
 
   const quickDebouncedParams = useDebounce(params, 0);
-const slowDebouncedParams = useDebounce(params, 1000);
+  const slowDebouncedParams = useDebounce(params, 1000);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const glRef = useRef<WebGLRenderingContext | null>(null);
+  const glRef = useRef<WebGL2RenderingContext | null>(null);
   const programRef = useRef<WebGLProgram | null>(null);
   const textureRef = useRef<WebGLTexture | null>(null);
+  const vaoRef = useRef<WebGLVertexArrayObject | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const isDragging = useRef(false);
   const lastMousePos = useRef({ x: 0, y: 0 });
@@ -65,9 +69,9 @@ const slowDebouncedParams = useDebounce(params, 1000);
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const gl = canvas.getContext('webgl');
+    const gl = canvas.getContext('webgl2');
     if (!gl) {
-      console.error('WebGL not supported');
+      console.error('WebGL 2 not supported');
       return;
     }
 
@@ -104,18 +108,26 @@ const slowDebouncedParams = useDebounce(params, 1000);
 
     programRef.current = program;
 
+    const positionLocation = gl.getAttribLocation(program, 'a_position');
     const positionBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
       -1, -1,
       1, -1,
       -1, 1,
+      -1, 1,
+      1, -1,
       1, 1
     ]), gl.STATIC_DRAW);
 
-    const positionLocation = gl.getAttribLocation(program, 'a_position');
+    const vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
     gl.enableVertexAttribArray(positionLocation);
     gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+    vaoRef.current = vao;
+
+
 
     textureRef.current = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, textureRef.current);
@@ -130,24 +142,45 @@ const slowDebouncedParams = useDebounce(params, 1000);
     const gl = glRef.current;
     const program = programRef.current;
     if (!gl || !program) return;
-
+  
     gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
+    const vao = vaoRef.current;
+  
     gl.useProgram(program);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindVertexArray(vao);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
   }, []);
-
+  
+  // Update handleBinaryData function
   const handleBinaryData = useCallback((pixelData: Uint8Array) => {
     const gl = glRef.current;
     if (gl && textureRef.current) {
       gl.bindTexture(gl.TEXTURE_2D, textureRef.current);
       const { width, height } = params;
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixelData);
-      renderFractal();
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixelData);
+      setNeedsRender(true);
     }
-  }, [params, renderFractal]);
+  }, [params]);
+
+  const renderLoop = useCallback(() => {
+    if (needsRender) {
+      renderFractal();
+      setNeedsRender(false);
+    }
+    animationFrameId.current = requestAnimationFrame(renderLoop);
+  }, [needsRender, renderFractal]);
+
+  useEffect(() => {
+    renderLoop();
+    return () => {
+      if (animationFrameId.current) {
+        cancelAnimationFrame(animationFrameId.current);
+      }
+    };
+  }, [renderLoop]);
 
   useEffect(() => {
     initWebGL();
@@ -166,12 +199,10 @@ const slowDebouncedParams = useDebounce(params, 1000);
 
     wsRef.current.onmessage = (event) => {
       if (event.data instanceof Blob) {
-        // Handle Blob data
         event.data.arrayBuffer().then(buffer => {
           handleBinaryData(new Uint8Array(buffer));
         });
       } else if (event.data instanceof ArrayBuffer) {
-        // Handle ArrayBuffer data directly
         handleBinaryData(new Uint8Array(event.data));
       }
     };
@@ -282,33 +313,6 @@ const slowDebouncedParams = useDebounce(params, 1000);
     isDragging.current = false;
   };
 
-  // const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-  //   e.preventDefault();
-  //   const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-
-  //   setParams((prev) => {
-  //     const rect = canvasRef.current?.getBoundingClientRect();
-  //     if (!rect) return prev;
-
-  //     const mouseX = e.clientX - rect.left;
-  //     const mouseY = e.clientY - rect.top;
-
-  //     const centerX = prev.center.real + (mouseX - prev.width / 2) / prev.zoom;
-  //     const centerY = prev.center.imag - (mouseY - prev.height / 2) / prev.zoom;
-
-  //     const newZoom = prev.zoom * zoomFactor;
-
-  //     return {
-  //       ...prev,
-  //       zoom: newZoom,
-  //       center: {
-  //         real: centerX - (mouseX - prev.width / 2) / newZoom,
-  //         imag: centerY + (mouseY - prev.height / 2) / newZoom,
-  //       },
-  //     };
-  //   });
-  // };
-
   return (
     <div className="container mx-auto p-4">
       <Card className="w-full h-full">
@@ -344,9 +348,9 @@ const slowDebouncedParams = useDebounce(params, 1000);
                 <Label htmlFor="zoom">Zoom</Label>
                 <Slider
                   id="zoom"
-                  min={100}
+                  min={250}
                   max={10000}
-                  step={100}
+                  step={1}
                   value={[params.zoom]}
                   onValueChange={(value) => setParams((prev) => ({ ...prev, zoom: value[0] }))}
                 />
